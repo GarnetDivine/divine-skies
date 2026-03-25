@@ -73,9 +73,31 @@ public class HdBridge
         origOverrideSky = configManager.getConfiguration(HD_GROUP, KEY_OVERRIDE_SKY);
         origSkyboxColor = client.getSkyboxColor();
 
-        // Capture the user's base brightness and contrast from 117 HD
-        baseBrightness = readIntConfig(KEY_BRIGHTNESS, 100);
-        baseContrast = readIntConfig(KEY_CONTRAST, 100);
+        // Capture the user's base brightness/contrast from 117 HD
+        int previouslySavedBrightness = readOwnIntConfig(SkyCycleConfig.KEY_SAVED_HD_BRIGHTNESS, -1);
+        int previouslySavedContrast   = readOwnIntConfig(SkyCycleConfig.KEY_SAVED_HD_CONTRAST, -1);
+
+        if (previouslySavedBrightness != -1)
+        {
+            baseBrightness = previouslySavedBrightness;
+        }
+        else
+        {
+            baseBrightness = readIntConfig(KEY_BRIGHTNESS, 100);
+            configManager.setConfiguration(SkyCycleConfig.CONFIG_GROUP,
+                SkyCycleConfig.KEY_SAVED_HD_BRIGHTNESS, String.valueOf(baseBrightness));
+        }
+
+        if (previouslySavedContrast != -1)
+        {
+            baseContrast = previouslySavedContrast;
+        }
+        else
+        {
+            baseContrast = readIntConfig(KEY_CONTRAST, 100);
+            configManager.setConfiguration(SkyCycleConfig.CONFIG_GROUP,
+                SkyCycleConfig.KEY_SAVED_HD_CONTRAST, String.valueOf(baseContrast));
+        }
 
         settingsSaved = true;
         log.debug("Saved 117HD settings: sky={}, override={}, brightness={}, contrast={}",
@@ -99,6 +121,12 @@ public class HdBridge
         // Restore original brightness/contrast
         configManager.setConfiguration(HD_GROUP, KEY_BRIGHTNESS, String.valueOf(baseBrightness));
         configManager.setConfiguration(HD_GROUP, KEY_CONTRAST, String.valueOf(baseContrast));
+
+        // Clear the persisted baseline now that we've cleanly restored
+        configManager.setConfiguration(SkyCycleConfig.CONFIG_GROUP,
+            SkyCycleConfig.KEY_SAVED_HD_BRIGHTNESS, "-1");
+        configManager.setConfiguration(SkyCycleConfig.CONFIG_GROUP,
+            SkyCycleConfig.KEY_SAVED_HD_CONTRAST, "-1");
 
         settingsSaved = false;
         log.debug("Restored 117HD settings");
@@ -132,6 +160,20 @@ public class HdBridge
 
         configManager.setConfiguration(HD_GROUP, KEY_BRIGHTNESS, String.valueOf(newBrightness));
         configManager.setConfiguration(HD_GROUP, KEY_CONTRAST, String.valueOf(newContrast));
+    }
+
+    private int readOwnIntConfig(String key, int defaultValue)
+    {
+        String val = configManager.getConfiguration(SkyCycleConfig.CONFIG_GROUP, key);
+        if (val == null) return defaultValue;
+        try
+        {
+            return Integer.parseInt(val);
+        }
+        catch (NumberFormatException e)
+        {
+            return defaultValue;
+        }
     }
 
     private int readIntConfig(String key, int defaultValue)

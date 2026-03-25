@@ -443,6 +443,22 @@ public interface SkyCycleConfig extends Config
         return false;
     }
 
+    // Internal: persisted 117HD baseline (hidden from UI)
+    String KEY_SAVED_HD_BRIGHTNESS = "savedHdBrightness";
+    String KEY_SAVED_HD_CONTRAST   = "savedHdContrast";
+
+    @ConfigItem(keyName = KEY_SAVED_HD_BRIGHTNESS, name = "", description = "", hidden = true)
+    default int savedHdBrightness() { return -1; }
+
+    @ConfigItem(keyName = KEY_SAVED_HD_BRIGHTNESS, name = "", description = "", hidden = true)
+    void savedHdBrightness(int value);
+
+    @ConfigItem(keyName = KEY_SAVED_HD_CONTRAST, name = "", description = "", hidden = true)
+    default int savedHdContrast() { return -1; }
+
+    @ConfigItem(keyName = KEY_SAVED_HD_CONTRAST, name = "", description = "", hidden = true)
+    void savedHdContrast(int value);
+
     // =============================================
     // Advanced
     // =============================================
