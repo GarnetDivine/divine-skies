@@ -28,17 +28,14 @@ import java.util.Set;
 /**
  * Detects whether the player is underground, in Death's Office, or in a Player-Owned House.
  *
- * Detection uses three layers:
- * 1. FORCE_SURFACE_REGIONS — always treated as surface, even if Y > 8000.
- * 2. FORCE_UNDERGROUND_REGIONS — always underground (region IDs that don't overlap surface chunks).
- * 3. INSTANCE_UNDERGROUND_REGIONS — underground ONLY when the player is in an instanced region
- *    or on a non-zero plane. These region IDs share chunk coordinates with surface-world areas,
- *    so we can't use the region ID alone without false positives.
- * 4. Y coordinate fallback — if no region override matches, Y > 8000 = underground.
+ * Detection uses three layers for underground:
+ * 1. FORCE_SURFACE_REGIONS - always treated as surface, even if Y > 8000.
+ * 2. FORCE_UNDERGROUND_REGIONS - always underground (no surface overlap).
+ * 3. INSTANCE_UNDERGROUND_REGIONS - underground ONLY when instanced or non-zero plane.
+ * 4. Y coordinate fallback - Y > 8000 = underground.
  *
- * To find new region IDs: enable RuneLite's "Developer Tools" plugin.
- * The region overlay shows the ID on screen. Add safe IDs to FORCE_UNDERGROUND_REGIONS.
- * If the region overlaps with a surface area, add it to INSTANCE_UNDERGROUND_REGIONS instead.
+ * POH detection uses chunk coordinate range matching since POH regions cluster
+ * in a specific area that doesn't overlap with the surface world.
  */
 @Singleton
 public class UndergroundDetector
@@ -71,37 +68,24 @@ public class UndergroundDetector
 
     /**
      * Regions that are underground ONLY when the player is in an instance or on a
-     * non-ground plane. These share chunk coordinates with surface-world areas,
-     * so region ID alone would cause false positives (e.g. Burthorpe Games Room
-     * region overlaps with the Burthorpe/Varrock surface area).
+     * non-ground plane. These share chunk coordinates with surface-world areas.
      */
-private static final Set<Integer> INSTANCE_UNDERGROUND_REGIONS = new HashSet<>(Arrays.asList(
-    9781,   // Tree Gnome Village Maze Cave
-    11050,  // Ape Atoll Cooking Cave
-    11058,  // Lassar Undercity
-    12132,  // Duke Sucellus
-    12598,  // Burthorpe Games Room
-    13107,  // Abandoned Mine 2nd floor
-    14385   // Phantom Muspah Arena
-));
+    private static final Set<Integer> INSTANCE_UNDERGROUND_REGIONS = new HashSet<>(Arrays.asList(
+        9781,   // Tree Gnome Village Maze Cave
+        11050,  // Ape Atoll Cooking Cave
+        11058,  // Lassar Undercity
+        12132,  // Duke Sucellus
+        12598,  // Burthorpe Games Room
+        13107,  // Abandoned Mine 2nd floor
+        14385   // Phantom Muspah Arena
+    ));
 
     /**
      * Regions that should ALWAYS be treated as surface/overworld, even if the
      * Y coordinate would otherwise flag them as underground.
      */
     private static final Set<Integer> FORCE_SURFACE_REGIONS = new HashSet<>(Arrays.asList(
-        10041,   // Reported: needs overworld sky, gets flashbanged at dawn otherwise
-    12850,  // Brutus Arena (instanced but visually outdoors)
-    12851,  // Brutus Arena
-    12852,  // Brutus Arena
-    13106,  // Brutus Arena
-    13108   // Brutus Arena
-    ));
-
-    // Player-Owned House instance regions
-    private static final Set<Integer> POH_REGIONS = new HashSet<>(Arrays.asList(
-        7513,
-        7769
+        10041   // Reported: needs overworld sky
     ));
 
     private final Client client;
@@ -113,14 +97,42 @@ private static final Set<Integer> INSTANCE_UNDERGROUND_REGIONS = new HashSet<>(A
     }
 
     /**
+     * Check if the player is in a Player-Owned House instance.
+     * POH regions cluster in chunk coordinates X=29-30, Y=85-115, which are
+     * well outside the surface world range. We match any instanced region
+     * in that coordinate space. This works for your own house and other
+     * players' houses regardless of location or size.
+     */
+    public boolean isInPlayerHouse()
+    {
+        if (!client.isInInstancedRegion()) return false;
+
+        int[] regions = client.getMapRegions();
+        if (regions == null) return false;
+
+        for (int region : regions)
+        {
+            int chunkX = region >> 8;
+            int chunkY = region & 0xFF;
+
+            // POH chunks fall in X=29-30, Y=85-115
+            if (chunkX >= 29 && chunkX <= 30 && chunkY >= 85 && chunkY <= 115)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Determine if the player is currently in an underground/dungeon area.
      *
      * Priority:
      * 1. POH check is handled separately by the caller
-     * 2. Force-surface override → NOT underground
-     * 3. Force-underground (safe regions) → underground
-     * 4. Instance-underground (ambiguous regions + instance/plane check) → underground
-     * 5. Y coordinate fallback → Y > 8000 = underground
+     * 2. Force-surface override - NOT underground
+     * 3. Force-underground (safe regions) - underground
+     * 4. Instance-underground (ambiguous regions + instance/plane check) - underground
+     * 5. Y coordinate fallback - Y > 8000 = underground
      */
     public boolean isUnderground()
     {
@@ -139,7 +151,7 @@ private static final Set<Integer> INSTANCE_UNDERGROUND_REGIONS = new HashSet<>(A
                 }
             }
 
-            // 2. Safe force-underground — no surface overlap, region ID is sufficient
+            // 2. Safe force-underground - no surface overlap
             for (int region : regions)
             {
                 if (FORCE_UNDERGROUND_REGIONS.contains(region))
@@ -148,11 +160,10 @@ private static final Set<Integer> INSTANCE_UNDERGROUND_REGIONS = new HashSet<>(A
                 }
             }
 
-            // 3. Ambiguous regions — only count as underground if instanced or non-ground plane
+			// 3. Ambiguous regions - only count as underground if instanced
             boolean isInstance = client.isInInstancedRegion();
-            int plane = client.getPlane();
 
-            if (isInstance || plane > 0)
+            if (isInstance)
             {
                 for (int region : regions)
                 {
@@ -169,21 +180,6 @@ private static final Set<Integer> INSTANCE_UNDERGROUND_REGIONS = new HashSet<>(A
         if (wp == null) return false;
 
         return wp.getY() > UNDERGROUND_Y_THRESHOLD;
-    }
-
-    /**
-     * Check if the player is in a Player-Owned House instance.
-     */
-    public boolean isInPlayerHouse()
-    {
-        int[] regions = client.getMapRegions();
-        if (regions == null) return false;
-
-        for (int region : regions)
-        {
-            if (POH_REGIONS.contains(region)) return true;
-        }
-        return false;
     }
 
     /**
