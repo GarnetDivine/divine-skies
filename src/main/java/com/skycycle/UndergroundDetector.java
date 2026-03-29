@@ -34,8 +34,8 @@ import java.util.Set;
  * 3. INSTANCE_UNDERGROUND_REGIONS - underground ONLY when instanced or non-zero plane.
  * 4. Y coordinate fallback - Y > 8000 = underground.
  *
- * POH detection uses chunk coordinate range matching since POH regions cluster
- * in a specific area that doesn't overlap with the surface world.
+ * POH detection uses chunk coordinate range matching with an exclusion set for
+ * non-POH instanced regions that fall within the same coordinate space.
  */
 @Singleton
 public class UndergroundDetector
@@ -88,6 +88,15 @@ public class UndergroundDetector
         10041   // Reported: needs overworld sky
     ));
 
+    /**
+     * Instanced regions that fall within the POH chunk coordinate space
+     * but are NOT player houses. These must be explicitly excluded from
+     * POH detection to prevent false positives.
+     */
+    private static final Set<Integer> POH_EXCLUSION_REGIONS = new HashSet<>(Arrays.asList(
+        8023    // Demonic Gorilla Cave (chunkX=31, chunkY=87, instanced)
+    ));
+
     private final Client client;
 
     @Inject
@@ -98,10 +107,12 @@ public class UndergroundDetector
 
     /**
      * Check if the player is in a Player-Owned House instance.
-     * POH regions cluster in chunk coordinates X=29-30, Y=85-115, which are
-     * well outside the surface world range. We match any instanced region
-     * in that coordinate space. This works for your own house and other
-     * players' houses regardless of location or size.
+     * POH instances occupy chunk coordinates X=24-33, Y=75-120. This covers
+     * all house sizes (1x1 through 8x8), all floors (ground/upper/dungeon),
+     * and all 9 portal locations (they all use the same instance space).
+     *
+     * The exclusion set prevents false positives from non-POH instanced regions
+     * that happen to fall within the same coordinate range (e.g. Demonic Gorillas).
      */
     public boolean isInPlayerHouse()
     {
@@ -110,13 +121,22 @@ public class UndergroundDetector
         int[] regions = client.getMapRegions();
         if (regions == null) return false;
 
+        // Exclusion check first — bail if any loaded region is a known non-POH instance
+        for (int region : regions)
+        {
+            if (POH_EXCLUSION_REGIONS.contains(region))
+            {
+                return false;
+            }
+        }
+
+        // Range check — POH chunks fall in X=24-33, Y=75-120
         for (int region : regions)
         {
             int chunkX = region >> 8;
             int chunkY = region & 0xFF;
 
-            // POH chunks fall in X=29-30, Y=85-115
-            if (chunkX >= 29 && chunkX <= 30 && chunkY >= 85 && chunkY <= 115)
+            if (chunkX >= 24 && chunkX <= 33 && chunkY >= 75 && chunkY <= 120)
             {
                 return true;
             }
@@ -131,7 +151,7 @@ public class UndergroundDetector
      * 1. POH check is handled separately by the caller
      * 2. Force-surface override - NOT underground
      * 3. Force-underground (safe regions) - underground
-     * 4. Instance-underground (ambiguous regions + instance/plane check) - underground
+     * 4. Instance-underground (ambiguous regions + instance check) - underground
      * 5. Y coordinate fallback - Y > 8000 = underground
      */
     public boolean isUnderground()
@@ -160,7 +180,7 @@ public class UndergroundDetector
                 }
             }
 
-			// 3. Ambiguous regions - only count as underground if instanced
+            // 3. Ambiguous regions - only count as underground if instanced
             boolean isInstance = client.isInInstancedRegion();
 
             if (isInstance)
