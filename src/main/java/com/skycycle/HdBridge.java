@@ -42,11 +42,13 @@ public class HdBridge
     private static final String KEY_OVERRIDE_SKY = "overrideSky";
     private static final String KEY_BRIGHTNESS = "screenBrightness";
     private static final String KEY_CONTRAST = "fContrast";
+    private static final String KEY_SHADOW_MODE = "shadowMode"; // OFF / FAST / DETAILED
 
     // Keys in our own config group for persisted baselines
     private static final String DS_GROUP = SkyCycleConfig.CONFIG_GROUP;
     private static final String DS_BASE_BRIGHTNESS = "hdBaseBrightness";
     private static final String DS_BASE_CONTRAST = "hdBaseContrast";
+    private static final String DS_BASE_SHADOW_MODE = "hdBaseShadowMode";
     private static final String DS_ORIG_DEFAULT_SKY = "hdOrigDefaultSky";
     private static final String DS_ORIG_OVERRIDE_SKY = "hdOrigOverrideSky";
     private static final String DS_DIRTY = "hdDirty";
@@ -64,9 +66,13 @@ public class HdBridge
     private int baseBrightness = 100;
     private int baseContrast = 100;
 
+    // The user's true base shadow mode from 117 HD (OFF / FAST / DETAILED)
+    private String baseShadowMode = "DETAILED";
+
     // Track the last offsets we applied so we can detect external 117HD changes
     private int lastAppliedBrightness = -1;
     private int lastAppliedContrast = -1;
+    private String lastAppliedShadowMode = null;
 
     @Inject
     public HdBridge(ConfigManager configManager, Client client)
@@ -108,6 +114,7 @@ public class HdBridge
             // Previous session didn't shut down cleanly — use our persisted baselines
             baseBrightness = readOurIntConfig(DS_BASE_BRIGHTNESS, 100);
             baseContrast = readOurIntConfig(DS_BASE_CONTRAST, 100);
+            baseShadowMode = readOurStringConfig(DS_BASE_SHADOW_MODE, "DETAILED");
             origDefaultSky = configManager.getConfiguration(DS_GROUP, DS_ORIG_DEFAULT_SKY);
             origOverrideSky = configManager.getConfiguration(DS_GROUP, DS_ORIG_OVERRIDE_SKY);
 
@@ -118,6 +125,7 @@ public class HdBridge
             // Immediately write the correct baselines back to 117HD so it's in a known state
             configManager.setConfiguration(HD_GROUP, KEY_BRIGHTNESS, String.valueOf(baseBrightness));
             configManager.setConfiguration(HD_GROUP, KEY_CONTRAST, String.valueOf(baseContrast));
+            configManager.setConfiguration(HD_GROUP, KEY_SHADOW_MODE, baseShadowMode);
             if (origDefaultSky != null)
             {
                 configManager.setConfiguration(HD_GROUP, KEY_DEFAULT_SKY, origDefaultSky);
@@ -134,10 +142,12 @@ public class HdBridge
             origOverrideSky = configManager.getConfiguration(HD_GROUP, KEY_OVERRIDE_SKY);
             baseBrightness = readIntConfig(KEY_BRIGHTNESS, 100);
             baseContrast = readIntConfig(KEY_CONTRAST, 100);
+            baseShadowMode = readStringConfig(KEY_SHADOW_MODE, "DETAILED");
 
             // Persist these as our known-good baselines
             configManager.setConfiguration(DS_GROUP, DS_BASE_BRIGHTNESS, String.valueOf(baseBrightness));
             configManager.setConfiguration(DS_GROUP, DS_BASE_CONTRAST, String.valueOf(baseContrast));
+            configManager.setConfiguration(DS_GROUP, DS_BASE_SHADOW_MODE, baseShadowMode);
             if (origDefaultSky != null)
             {
                 configManager.setConfiguration(DS_GROUP, DS_ORIG_DEFAULT_SKY, origDefaultSky);
@@ -159,6 +169,7 @@ public class HdBridge
         settingsSaved = true;
         lastAppliedBrightness = -1;
         lastAppliedContrast = -1;
+        lastAppliedShadowMode = null;
     }
 
     /**
@@ -178,9 +189,10 @@ public class HdBridge
         }
         client.setSkyboxColor(origSkyboxColor);
 
-        // Restore original brightness/contrast
+        // Restore original brightness/contrast/shadows
         configManager.setConfiguration(HD_GROUP, KEY_BRIGHTNESS, String.valueOf(baseBrightness));
         configManager.setConfiguration(HD_GROUP, KEY_CONTRAST, String.valueOf(baseContrast));
+        configManager.setConfiguration(HD_GROUP, KEY_SHADOW_MODE, baseShadowMode);
 
         // Clean shutdown — clear the dirty flag so next startup reads fresh from 117HD
         configManager.setConfiguration(DS_GROUP, DS_DIRTY, "false");
@@ -188,6 +200,7 @@ public class HdBridge
         settingsSaved = false;
         lastAppliedBrightness = -1;
         lastAppliedContrast = -1;
+        lastAppliedShadowMode = null;
         log.debug("Restored 117HD settings and cleared dirty flag");
     }
 
@@ -207,10 +220,19 @@ public class HdBridge
         baseBrightness = readIntConfig(KEY_BRIGHTNESS, 100);
         baseContrast = readIntConfig(KEY_CONTRAST, 100);
 
+        // Only recapture the shadow mode if we are NOT currently forcing a night shadow
+        // value — otherwise we'd capture our own override as the user's baseline.
+        if (lastAppliedShadowMode == null || lastAppliedShadowMode.equals(baseShadowMode))
+        {
+            baseShadowMode = readStringConfig(KEY_SHADOW_MODE, "DETAILED");
+            configManager.setConfiguration(DS_GROUP, DS_BASE_SHADOW_MODE, baseShadowMode);
+        }
+
         configManager.setConfiguration(DS_GROUP, DS_BASE_BRIGHTNESS, String.valueOf(baseBrightness));
         configManager.setConfiguration(DS_GROUP, DS_BASE_CONTRAST, String.valueOf(baseContrast));
 
-        log.info("Recaptured 117HD baselines: brightness={}, contrast={}", baseBrightness, baseContrast);
+        log.info("Recaptured 117HD baselines: brightness={}, contrast={}, shadows={}",
+            baseBrightness, baseContrast, baseShadowMode);
     }
 
     /**
@@ -253,6 +275,32 @@ public class HdBridge
     }
 
     /**
+     * Set 117 HD's shadow mode, or restore the user's baseline.
+     *
+     * <p>Skips redundant writes internally, so it is safe to call every update tick.</p>
+     *
+     * @param mode "OFF" or "FAST" to force a night shadow mode, or null to restore
+     *             the user's captured baseline (day / underground / POH / shutdown).
+     */
+    public void applyShadowMode(String mode)
+    {
+        if (!settingsSaved)
+        {
+            return;
+        }
+
+        String target = (mode == null) ? baseShadowMode : mode;
+        if (target.equals(lastAppliedShadowMode))
+        {
+            return;
+        }
+
+        log.debug("SkyCycle shadow mode: base={}, applying={}", baseShadowMode, target);
+        configManager.setConfiguration(HD_GROUP, KEY_SHADOW_MODE, target);
+        lastAppliedShadowMode = target;
+    }
+
+    /**
      * Get the persisted base brightness (for use by the overlay or other display).
      */
     public int getBaseBrightness()
@@ -266,6 +314,18 @@ public class HdBridge
     public int getBaseContrast()
     {
         return baseContrast;
+    }
+
+    private String readStringConfig(String key, String defaultValue)
+    {
+        String val = configManager.getConfiguration(HD_GROUP, key);
+        return (val == null || val.isEmpty()) ? defaultValue : val;
+    }
+
+    private String readOurStringConfig(String key, String defaultValue)
+    {
+        String val = configManager.getConfiguration(DS_GROUP, key);
+        return (val == null || val.isEmpty()) ? defaultValue : val;
     }
 
     private int readIntConfig(String key, int defaultValue)

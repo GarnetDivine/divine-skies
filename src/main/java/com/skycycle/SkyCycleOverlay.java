@@ -128,24 +128,49 @@ public class SkyCycleOverlay extends Overlay
             // Developer Mode: show region/instance/plane info for community bug reporting
             if (config.devMode())
             {
+                UndergroundDetector detector = plugin.getUndergroundDetector();
                 int[] regions = plugin.getClient().getMapRegions();
+
+                int resolved = detector.getResolvedRegion();
+                panelComponent.getChildren().add(LineComponent.builder()
+                    .left("Region (resolved):")
+                    .right(resolved >= 0 ? String.valueOf(resolved) : "—")
+                    .rightColor(new Color(200, 200, 120))
+                    .build());
+
                 if (regions != null)
                 {
                     panelComponent.getChildren().add(LineComponent.builder()
-                        .left("Region:")
+                        .left("Loaded:")
                         .right(java.util.Arrays.toString(regions))
                         .rightColor(new Color(180, 180, 180))
                         .build());
+                }
 
-                    panelComponent.getChildren().add(LineComponent.builder()
-                        .left("Instance:")
-                        .right(String.valueOf(plugin.getClient().isInInstancedRegion()))
-                        .rightColor(new Color(180, 180, 180))
-                        .build());
+                panelComponent.getChildren().add(LineComponent.builder()
+                    .left("Instance:")
+                    .right(String.valueOf(plugin.getClient().isInInstancedRegion()))
+                    .rightColor(new Color(180, 180, 180))
+                    .build());
 
+                panelComponent.getChildren().add(LineComponent.builder()
+                    .left("Plane:")
+                    .right(String.valueOf(plugin.getClient().getPlane()))
+                    .rightColor(new Color(180, 180, 180))
+                    .build());
+
+                AreaType override = detector.getCurrentOverride();
+                panelComponent.getChildren().add(LineComponent.builder()
+                    .left("Override:")
+                    .right(override == null ? "none (auto)" : override.getDisplayName())
+                    .rightColor(override == null ? new Color(140, 140, 140) : new Color(120, 220, 140))
+                    .build());
+
+                if (detector.getOverrideCount() > 0)
+                {
                     panelComponent.getChildren().add(LineComponent.builder()
-                        .left("Plane:")
-                        .right(String.valueOf(plugin.getClient().getPlane()))
+                        .left("Saved overrides:")
+                        .right(String.valueOf(detector.getOverrideCount()))
                         .rightColor(new Color(180, 180, 180))
                         .build());
                 }

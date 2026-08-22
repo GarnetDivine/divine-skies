@@ -17,6 +17,7 @@ package com.skycycle;
 import net.runelite.client.config.*;
 
 import java.awt.Color;
+import java.awt.event.KeyEvent;
 
 @ConfigGroup(SkyCycleConfig.CONFIG_GROUP)
 public interface SkyCycleConfig extends Config
@@ -337,6 +338,20 @@ public interface SkyCycleConfig extends Config
         return 20;
     }
 
+    @ConfigItem(
+        keyName = "nightShadowMode",
+        name = "Night Shadows",
+        description = "Control 117 HD's shadows during nighttime. 'No Shadows' removes them, " +
+            "'Reduced (Fast)' switches to 117 HD's softer fast shadows, 'Unchanged' leaves your " +
+            "117 HD setting alone. Your normal shadows return at sunrise.",
+        section = nightSection,
+        position = 6
+    )
+    default NightShadowMode nightShadowMode()
+    {
+        return NightShadowMode.OFF;
+    }
+
     // =============================================
     // Transition
     // =============================================
@@ -580,13 +595,74 @@ public interface SkyCycleConfig extends Config
     }
 
     // =============================================
+    // Manual Overrides
+    // =============================================
+
+    @ConfigSection(
+        name = "Manual Overrides",
+        description = "Manually correct how an area is classified. Useful when automatic " +
+            "detection gets an area wrong. Overrides are saved per region and persist between sessions.",
+        position = 8
+    )
+    String overrideSection = "overrideSection";
+
+    @ConfigItem(
+        keyName = "allowManualOverrides",
+        name = "Enable Manual Overrides",
+        description = "Allow the toggle hotkey to manually set the area type for the region you're standing in.",
+        section = overrideSection,
+        position = 0
+    )
+    default boolean allowManualOverrides()
+    {
+        return true;
+    }
+
+    @ConfigItem(
+        keyName = "toggleAreaTypeKey",
+        name = "Toggle Area Type",
+        description = "Cycles the CURRENT region: Auto -> Underground -> Surface -> Player House -> Auto. " +
+            "The choice is saved for that region.",
+        section = overrideSection,
+        position = 1
+    )
+    default Keybind toggleAreaTypeKey()
+    {
+        return new Keybind(KeyEvent.VK_K, KeyEvent.SHIFT_DOWN_MASK);
+    }
+
+    @ConfigItem(
+        keyName = "overrideChatFeedback",
+        name = "Chat Feedback",
+        description = "Print a game chat message confirming the new area type when you press the toggle hotkey.",
+        section = overrideSection,
+        position = 2
+    )
+    default boolean overrideChatFeedback()
+    {
+        return true;
+    }
+
+    @ConfigItem(
+        keyName = "clearAllOverrides",
+        name = "Clear All Overrides",
+        description = "Remove every saved manual override and return all regions to automatic detection.",
+        section = overrideSection,
+        position = 3
+    )
+    default boolean clearAllOverrides()
+    {
+        return false;
+    }
+
+    // =============================================
     // Advanced
     // =============================================
 
     @ConfigSection(
         name = "Advanced",
         description = "Advanced configuration options.",
-        position = 8,
+        position = 9,
         closedByDefault = true
     )
     String advancedSection = "advancedSection";

@@ -58,14 +58,9 @@ public class SceneTintOverlay extends Overlay
             return null;
         }
 
-        // Don't tint when underground (underground has its own lighting)
-        if (plugin.isCurrentlyUnderground())
-        {
-            return null;
-        }
-
-        Color tintColor = getTintColor();
-        if (tintColor == null)
+        // Don't tint underground or in the POH — those areas use their own
+        // lighting / custom skybox, and a day/night tint there looks wrong.
+        if (plugin.isCurrentlyUnderground() || plugin.isCurrentlyInPoh())
         {
             return null;
         }
@@ -76,19 +71,17 @@ public class SceneTintOverlay extends Overlay
             return null;
         }
 
-        // Alpha ranges from 0 (invisible) to 255 (solid)
-        // We cap at ~60% opacity even at strength 100 because full solid looks terrible
-        int alpha = (int) Math.round(strength / 100.0 * 153);
-        alpha = Math.max(0, Math.min(153, alpha));
+        // Master alpha: 0 (invisible) to ~60% opacity at strength 100,
+        // because a fully solid fill looks terrible.
+        int masterAlpha = clampAlpha((int) Math.round(strength / 100.0 * 153));
 
-        Color overlayColor = new Color(
-            tintColor.getRed(),
-            tintColor.getGreen(),
-            tintColor.getBlue(),
-            alpha
-        );
+        Color overlayColor = getTintColor(masterAlpha);
+        if (overlayColor == null || overlayColor.getAlpha() <= 0)
+        {
+            return null;
+        }
 
-        // Fill the entire game canvas
+        // Fill the entire game canvas (UI widgets render above this layer)
         graphics.setColor(overlayColor);
         graphics.fillRect(0, 0, client.getCanvasWidth(), client.getCanvasHeight());
 
@@ -96,33 +89,51 @@ public class SceneTintOverlay extends Overlay
     }
 
     /**
-     * Determine the current tint color based on the configured mode.
+     * Determine the current tint color AND alpha based on the configured mode.
+     *
+     * <p>In CYCLE mode each phase has its own effective alpha: a disabled phase tint
+     * means alpha 0 for that phase (previously a disabled day tint would incorrectly
+     * borrow the night tint at full strength, tinting the daytime scene). During
+     * sunrise/sunset both the color and the alpha are smoothly interpolated, so a
+     * night-only tint now fades in over the sunset instead of popping.</p>
+     *
+     * @param masterAlpha the alpha corresponding to the configured tint strength
+     * @return the premixed overlay color with alpha, or null for no overlay
      */
-    private Color getTintColor()
+    private Color getTintColor(int masterAlpha)
     {
         SceneTintMode mode = config.sceneTintMode();
 
         if (mode == SceneTintMode.FIXED)
         {
-            return config.sceneTintFixedColor();
+            Color fixed = config.sceneTintFixedColor();
+            return withAlpha(fixed, masterAlpha);
         }
 
         // CYCLE mode: follow the day/night tint colors
         CycleEngine engine = plugin.getCycleEngine();
-        if (engine == null) return null;
+        if (engine == null)
+        {
+            return null;
+        }
 
         Color dayTint = config.dayTintEnabled() ? config.dayTintColor() : null;
         Color nightTint = config.nightTintEnabled() ? config.nightTintColor() : null;
 
-        // If neither day nor night tint is enabled, fall back to the transition color
+        // Neither tint enabled: nothing to draw. (Previously this fell back to the
+        // transition color, permanently orange-tinting the scene — surprising.)
         if (dayTint == null && nightTint == null)
         {
-            return config.transitionColor();
+            return null;
         }
 
-        // If only one is set, use it for both ends
-        if (dayTint == null) dayTint = nightTint;
-        if (nightTint == null) nightTint = dayTint;
+        int dayAlpha = dayTint != null ? masterAlpha : 0;
+        int nightAlpha = nightTint != null ? masterAlpha : 0;
+
+        // For color interpolation continuity, a disabled end borrows the other end's
+        // hue — but its alpha stays 0, so it never actually shows during that phase.
+        Color dayColor = dayTint != null ? dayTint : nightTint;
+        Color nightColor = nightTint != null ? nightTint : dayTint;
 
         CyclePhase phase = engine.getCurrentPhase();
         double progress = engine.getPhaseProgress();
@@ -130,21 +141,41 @@ public class SceneTintOverlay extends Overlay
         switch (phase)
         {
             case DAY:
-                return dayTint;
+                return dayAlpha > 0 ? withAlpha(dayColor, dayAlpha) : null;
             case NIGHT:
-                return nightTint;
+                return nightAlpha > 0 ? withAlpha(nightColor, nightAlpha) : null;
             case SUNSET:
             {
-                double t = progress * progress * (3 - 2 * progress); // smoothstep
-                return CycleEngine.lerpColor(dayTint, nightTint, t);
+                double t = smoothstep(progress);
+                Color c = CycleEngine.lerpColor(dayColor, nightColor, t);
+                int a = (int) Math.round(dayAlpha + (nightAlpha - dayAlpha) * t);
+                return withAlpha(c, clampAlpha(a));
             }
             case SUNRISE:
             {
-                double t = progress * progress * (3 - 2 * progress);
-                return CycleEngine.lerpColor(nightTint, dayTint, t);
+                double t = smoothstep(progress);
+                Color c = CycleEngine.lerpColor(nightColor, dayColor, t);
+                int a = (int) Math.round(nightAlpha + (dayAlpha - nightAlpha) * t);
+                return withAlpha(c, clampAlpha(a));
             }
             default:
-                return dayTint;
+                return dayAlpha > 0 ? withAlpha(dayColor, dayAlpha) : null;
         }
+    }
+
+    private static double smoothstep(double t)
+    {
+        t = Math.max(0, Math.min(1, t));
+        return t * t * (3 - 2 * t);
+    }
+
+    private static int clampAlpha(int a)
+    {
+        return Math.max(0, Math.min(153, a));
+    }
+
+    private static Color withAlpha(Color c, int alpha)
+    {
+        return new Color(c.getRed(), c.getGreen(), c.getBlue(), alpha);
     }
 }

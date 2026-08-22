@@ -17,16 +17,20 @@ package com.skycycle;
 import com.google.inject.Provides;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
+import net.runelite.client.input.KeyManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.overlay.OverlayManager;
+import net.runelite.client.util.HotkeyListener;
 
 import javax.inject.Inject;
 import java.awt.Color;
@@ -49,6 +53,19 @@ public class SkyCyclePlugin extends Plugin
     @Inject private UndergroundDetector undergroundDetector;
     @Inject private SkyCycleOverlay overlay;
     @Inject private SceneTintOverlay sceneTintOverlay;
+    @Inject private KeyManager keyManager;
+    @Inject private ClientThread clientThread;
+    @Inject private ConfigManager configManager;
+
+    private final HotkeyListener toggleAreaHotkey = new HotkeyListener(() -> config.toggleAreaTypeKey())
+    {
+        @Override
+        public void hotkeyPressed()
+        {
+            // Hotkey fires on the AWT thread; region/coordinate reads must happen on the client thread.
+            clientThread.invoke(SkyCyclePlugin.this::handleToggleArea);
+        }
+    };
 
     private CycleEngine cycleEngine;
     private boolean currentlyUnderground = false;
@@ -65,6 +82,7 @@ public class SkyCyclePlugin extends Plugin
     public boolean isCurrentlyUnderground() { return currentlyUnderground; }
     public boolean isCurrentlyInPoh() { return currentlyInPoh; }
     public Client getClient() { return client; }
+    public UndergroundDetector getUndergroundDetector() { return undergroundDetector; }
 
     @Override
     protected void startUp()
@@ -81,6 +99,7 @@ public class SkyCyclePlugin extends Plugin
 
         overlayManager.add(overlay);
         overlayManager.add(sceneTintOverlay);
+        keyManager.registerKeyListener(toggleAreaHotkey);
 
         if (hdBridge.isHdActive())
         {
@@ -100,6 +119,7 @@ public class SkyCyclePlugin extends Plugin
         log.info("Divine: Skies shutting down");
         overlayManager.remove(overlay);
         overlayManager.remove(sceneTintOverlay);
+        keyManager.unregisterKeyListener(toggleAreaHotkey);
 
         if (initialized)
         {
@@ -162,6 +182,35 @@ public class SkyCyclePlugin extends Plugin
 
         currentlyUnderground = underground;
         currentlyInPoh = inPoh && config.pohEnabled();
+
+        applyShadowState(underground, inPoh);
+    }
+
+    /**
+     * Force the configured shadow mode during the NIGHT phase on the surface,
+     * and restore the user's 117 HD baseline everywhere else (day, transitions,
+     * underground, POH). HdBridge skips redundant writes so this is tick-safe.
+     */
+    private void applyShadowState(boolean underground, boolean inPoh)
+    {
+        if (!initialized)
+        {
+            return;
+        }
+
+        NightShadowMode mode = config.nightShadowMode();
+        boolean nightOnSurface = !underground && !inPoh
+            && cycleEngine != null
+            && cycleEngine.getCurrentPhase() == CyclePhase.NIGHT;
+
+        if (nightOnSurface && mode != NightShadowMode.UNCHANGED)
+        {
+            hdBridge.applyShadowMode(mode.getHdValue());
+        }
+        else
+        {
+            hdBridge.applyShadowMode(null); // restore user's baseline
+        }
     }
 
     @Subscribe
@@ -170,6 +219,16 @@ public class SkyCyclePlugin extends Plugin
         if (!SkyCycleConfig.CONFIG_GROUP.equals(event.getGroup())) return;
 
         String key = event.getKey();
+
+        // "Clear All Overrides" acts as a button: when switched on, do the work and reset it.
+        if ("clearAllOverrides".equals(key) && config.clearAllOverrides())
+        {
+            int cleared = undergroundDetector.clearAllOverrides();
+            configManager.setConfiguration(SkyCycleConfig.CONFIG_GROUP, "clearAllOverrides", false);
+            sendChat("Cleared " + cleared + " region override" + (cleared == 1 ? "" : "s") + ".");
+            forceVisualRefresh();
+            return;
+        }
 
         // Only reconfigure the engine for timing-related changes — not overlay/tint/color toggles
         if (isTimingKey(key))
@@ -184,6 +243,55 @@ public class SkyCyclePlugin extends Plugin
 
         // Force an immediate visual update for any config change
         tickCounter = UPDATE_INTERVAL_TICKS;
+    }
+
+    /**
+     * Cycle the current region's manual override and apply the result immediately.
+     * Runs on the client thread (invoked from the hotkey listener).
+     */
+    private void handleToggleArea()
+    {
+        if (client.getGameState() != GameState.LOGGED_IN)
+        {
+            return;
+        }
+
+        String result = undergroundDetector.cycleOverrideAtCurrentLocation();
+        if (result == null)
+        {
+            // Overrides disabled, or no region resolvable (e.g. mid-load)
+            if (!config.allowManualOverrides())
+            {
+                sendChat("Manual overrides are disabled (enable them in the Divine: Skies settings).");
+            }
+            return;
+        }
+
+        if (config.overrideChatFeedback())
+        {
+            sendChat(result);
+        }
+
+        forceVisualRefresh();
+    }
+
+    /**
+     * Force the next tick to re-evaluate location and re-apply the sky immediately,
+     * bypassing the throttle interval.
+     */
+    private void forceVisualRefresh()
+    {
+        lastAppliedColor = null;   // invalidate the "skip redundant write" cache
+        tickCounter = UPDATE_INTERVAL_TICKS;
+    }
+
+    private void sendChat(String message)
+    {
+        if (client.getGameState() == GameState.LOGGED_IN)
+        {
+            client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+                "[Divine: Skies] " + message, null);
+        }
     }
 
     private static boolean isTimingKey(String key)
