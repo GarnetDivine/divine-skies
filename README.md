@@ -1,5 +1,34 @@
 # Divine: Skies
 
+Version update: 1.1 is now live!
+
+**Divine: Skies v1.1.0 is live**
+
+**Area detection got a full rework**
+- Instances (raids, POH, Gauntlet, boss rooms) now resolve their real template location instead of the junk coordinates the client hands out. This was behind a big chunk of the "why is my cave bright" reports
+- CoX, ToB, ToA and POH build mode now read directly off server state, so those can't get misdetected anymore
+- POH detection rebuilt off the actual template regions. Every portal, every house size, should just work now
+- Fixed the underground cutoff line. It was set too high and was missing a whole band of underground content
+
+**New: override hotkey (Shift+K by default)**
+- Stand in an area the plugin gets wrong, hit the key, and it swaps that area between Underground / Surface / Player House / back to auto
+- Whatever you set sticks. Saves per area, survives logout and client restarts
+- There's a Clear All button in the settings if you want to wipe them
+- Basically: if I got an area wrong, you can fix it yourself instead of waiting for me to patch it
+
+**Scene tint fixes**
+- If you only had Night Tint on, it was also tinting your daytime. Fixed
+- Tints were snapping on and off at sunrise/sunset instead of fading. Now they blend properly through the transition
+- Turning on Scene Tint with no day or night tint enabled used to leave everything orange forever. That's gone
+- Tint no longer covers your POH, since that's got its own sky anyway
+
+**New: night shadows**
+- Under Night Sky settings you can now have 117 HD's shadows turn off or drop to Fast when night hits, then come back at sunrise
+- Defaults to off at night. Set it to Unchanged if you want your shadows left alone
+- Your normal shadow setting gets saved and restored, including if the client crashes on you
+
+Shoutout to everyone sending in bug reports, that override hotkey exists because of you. Keep them coming, and if you find an area that's still wrong, turn on Developer Mode in the overlay settings and send me the region number it shows.
+
 A RuneLite plugin that adds a configurable day/night sky cycle to Old School RuneScape.
 
 ## Features
