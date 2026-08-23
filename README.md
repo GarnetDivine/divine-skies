@@ -1,7 +1,5 @@
 # Divine: Skies
 
-Version update: 1.1 is now live!
-
 **Divine: Skies v1.1.0 is live**
 
 **Area detection got a full rework**
